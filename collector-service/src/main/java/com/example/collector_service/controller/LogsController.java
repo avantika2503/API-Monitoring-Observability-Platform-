@@ -4,44 +4,79 @@ import java.time.Instant;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import com.example.collector_service.logs.ApiLog;
 import com.example.collector_service.logs.ApiLogRepository;
+import com.example.collector_service.alerts.Alert;
+import com.example.collector_service.alerts.AlertRepository;
 
 @RestController
 @RequestMapping("/api/logs")
-
 public class LogsController {
-    private final ApiLogRepository apiLogRepository;
 
-    public LogsController(ApiLogRepository apiLogRepository) {
+    private final ApiLogRepository apiLogRepository;
+    private final AlertRepository alertRepository;
+
+    public LogsController(ApiLogRepository apiLogRepository,
+                          AlertRepository alertRepository) {
         this.apiLogRepository = apiLogRepository;
+        this.alertRepository = alertRepository;
     }
 
-    // Endpoint that the tracking clients will call
+    // tracking clients will POST logs here
     @PostMapping
     public ResponseEntity<Void> createLog(@RequestBody ApiLog log) {
         if (log.getTimestamp() == null) {
             log.setTimestamp(Instant.now());
         }
-        apiLogRepository.save(log);
+
+        ApiLog saved = apiLogRepository.save(log);
+
+        // Rule 1: slow request
+         // slow request
+        if (saved.getLatencyMs() > 500) {
+            createAlert(
+                    "WARNING",
+                    "Slow response (>500ms)",
+                    saved
+            );
+        }
+
+        // Rule 2: server error
+        if (saved.getStatus() >= 500 && saved.getStatus() <= 599) {
+            createAlert(
+                    "CRITICAL",
+                    "5xx server error",
+                    saved
+            );
+        }
+
         return ResponseEntity.ok().build();
     }
+
+    private void createAlert(String level, String description, ApiLog log) {
+        String apiName = log.getService() + " " + log.getEndpoint();
+        long responseTime = log.getLatencyMs();
+        int statusCode = log.getStatus();
+
+        Alert alert = new Alert(
+                apiName,
+                level,
+                description,
+                responseTime,
+                statusCode
+        );
+
+        alertRepository.save(alert);
+    }
+
     @GetMapping
-    public Iterable<ApiLog> getLogs(
+    public List<ApiLog> getLogs(
             @RequestParam(required = false) String service,
             @RequestParam(required = false) Integer status,
             @RequestParam(required = false, defaultValue = "false") boolean slowOnly
     ) {
-        Iterable<ApiLog> all = apiLogRepository.findAll();
-
-        // simple in-memory filtering – enough for v1
         List<ApiLog> list = apiLogRepository.findAll();
         return list.stream()
                 .filter(log -> service == null || service.equals(log.getService()))

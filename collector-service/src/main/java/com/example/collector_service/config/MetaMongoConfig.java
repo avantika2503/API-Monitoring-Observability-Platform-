@@ -9,7 +9,7 @@ import com.mongodb.client.MongoClients;
 
 @Configuration
 @EnableMongoRepositories(
-        basePackages = "com.example.collector_service.meta",
+        basePackages = "com.example.collector_service.alerts",
         mongoTemplateRef = "metaMongoTemplate"
 )
 public class MetaMongoConfig {
